@@ -1041,7 +1041,7 @@ class InvoiceUploaderApp(ctk.CTk):
 
             th = ctk.CTkFrame(table_frame, fg_color="#444466", corner_radius=6)
             th.pack(fill="x", pady=(0, 2))
-            for col, w in [("", 30), ("Date", 100), ("Description", 250), ("Amount", 90), ("Type", 70)]:
+            for col, w in [("", 30), ("Date", 100), ("Description", 250), ("Amount", 90), ("Type", 70), ("Notes", 150)]:
                 ctk.CTkLabel(
                     th, text=col, width=w,
                     font=ctk.CTkFont(size=11, weight="bold"), text_color=TEXT,
@@ -1110,12 +1110,22 @@ class InvoiceUploaderApp(ctk.CTk):
                 type_btn.configure(command=_toggle_type)
                 type_btn.pack(side="left", padx=4, pady=4)
 
+                # Additional Notes
+                notes_entry = ctk.CTkEntry(
+                    row_frame, width=150, height=28,
+                    fg_color="#1E1E2E", border_color="#555566",
+                    font=ctk.CTkFont(size=11),
+                    placeholder_text="Notes...",
+                )
+                notes_entry.pack(side="left", padx=4, pady=4)
+
                 edit_rows.append({
                     "include": include_var,
                     "date": date_entry,
                     "description": desc_entry,
                     "amount": amt_entry,
                     "type": type_var,
+                    "notes": notes_entry,
                 })
 
             self._bank_edit_rows[fp] = edit_rows
@@ -1150,6 +1160,7 @@ class InvoiceUploaderApp(ctk.CTk):
                     "description": row["description"].get().strip(),
                     "amount": amount,
                     "type": row["type"].get() if hasattr(row["type"], "get") else row["type"],
+                    "notes": row["notes"].get().strip() if row.get("notes") else "",
                 })
 
             if txns:

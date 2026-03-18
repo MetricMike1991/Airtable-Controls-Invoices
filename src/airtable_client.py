@@ -274,6 +274,11 @@ def upload_bank_transactions(
             "Statement Period": statement_period,
             "Source File": source_file,
         }
+
+        notes = str(t.get("notes", "")).strip()
+        if notes:
+            fields["Additional Notes"] = notes
+
         batch.append(fields)
 
         if len(batch) >= 10:
