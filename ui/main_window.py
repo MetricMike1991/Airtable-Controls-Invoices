@@ -1231,6 +1231,10 @@ class InvoiceUploaderApp(ctk.CTk):
         self._clear_main()
         self._set_active_nav(self.btn_match)
 
+        # State for this tab
+        self._match_proposals: list[dict] = []
+        self._match_checkboxes: list[ctk.BooleanVar] = []
+
         container = ctk.CTkScrollableFrame(self.main_frame, fg_color=BG_DARK)
         container.pack(fill="both", expand=True, padx=20, pady=20)
 
@@ -1241,20 +1245,20 @@ class InvoiceUploaderApp(ctk.CTk):
 
         ctk.CTkLabel(
             container,
-            text="Automatically match invoices to bank transactions by amount.\n"
-                 "Debit transactions are compared against invoice totals (inc. VAT).\n"
-                 "Matched records are linked in both the Invoices and Bank Transactions tables.",
+            text="Smart matching: amount + date proximity (±14 days) + name similarity.\n"
+                 "Each invoice and transaction can only match once (one-to-one).\n"
+                 "Already-linked records are automatically skipped.",
             font=ctk.CTkFont(size=13), text_color=TEXT_DIM, justify="left",
         ).pack(anchor="w", pady=(0, 20))
 
-        # Run button
-        self.btn_run_match = ctk.CTkButton(
-            container, text="▶  Run Auto-Match", width=280, height=44,
+        # Step 1: Find matches button
+        self.btn_find_matches = ctk.CTkButton(
+            container, text="🔍  Find Proposed Matches", width=280, height=44,
             font=ctk.CTkFont(size=15, weight="bold"),
             fg_color=ACCENT, hover_color="#1D4ED8",
-            command=self._run_matching,
+            command=self._find_matches,
         )
-        self.btn_run_match.pack(pady=(0, 15))
+        self.btn_find_matches.pack(pady=(0, 15))
 
         # Progress
         self.match_progress = ctk.CTkProgressBar(container, width=500, height=14)
@@ -1262,22 +1266,40 @@ class InvoiceUploaderApp(ctk.CTk):
         self.match_progress.set(0)
 
         self.lbl_match_status = ctk.CTkLabel(
-            container, text="Ready — press Run to start matching.",
+            container, text="Ready — press Find to analyse records.",
             font=ctk.CTkFont(size=12), text_color=TEXT_DIM,
         )
-        self.lbl_match_status.pack(pady=(0, 20))
+        self.lbl_match_status.pack(pady=(0, 10))
 
-        # Results area (populated after matching)
-        self.match_results_frame = ctk.CTkFrame(container, fg_color=BG_DARK)
-        self.match_results_frame.pack(fill="both", expand=True)
+        # Stats area (filled after finding)
+        self.match_stats_frame = ctk.CTkFrame(container, fg_color=BG_DARK)
+        self.match_stats_frame.pack(fill="x")
 
-    def _run_matching(self):
-        self.btn_run_match.configure(state="disabled", text="⏳  Matching...")
+        # Action bar (select all / confirm) — hidden until proposals exist
+        self.match_action_bar = ctk.CTkFrame(container, fg_color=BG_DARK)
+        self.match_action_bar.pack(fill="x", pady=(10, 5))
+
+        # Proposals list
+        self.match_proposals_frame = ctk.CTkFrame(container, fg_color=BG_DARK)
+        self.match_proposals_frame.pack(fill="both", expand=True)
+
+    # ------------------------------------------------------------------
+    # Step 1: Find proposed matches
+    # ------------------------------------------------------------------
+
+    def _find_matches(self):
+        self.btn_find_matches.configure(state="disabled", text="⏳  Analysing...")
         self.match_progress.set(0)
         self.lbl_match_status.configure(text="Fetching data from Airtable...", text_color=TEXT_DIM)
-        # Clear previous results
-        for w in self.match_results_frame.winfo_children():
+        # Clear previous
+        for w in self.match_stats_frame.winfo_children():
             w.destroy()
+        for w in self.match_action_bar.winfo_children():
+            w.destroy()
+        for w in self.match_proposals_frame.winfo_children():
+            w.destroy()
+        self._match_proposals = []
+        self._match_checkboxes = []
 
         def _progress(done, total, msg):
             if total > 0:
@@ -1285,62 +1307,224 @@ class InvoiceUploaderApp(ctk.CTk):
             self.after(0, lambda m=msg: self.lbl_match_status.configure(text=m, text_color=TEXT_DIM))
 
         def _worker():
-            from src.airtable_client import auto_match_invoices
+            from src.airtable_client import find_proposed_matches
             try:
-                result = auto_match_invoices(progress_callback=_progress)
-                self.after(0, lambda: self._show_match_results(result))
+                result = find_proposed_matches(progress_callback=_progress)
+                self.after(0, lambda: self._show_proposals(result))
             except Exception as e:
                 self.after(0, lambda: self.lbl_match_status.configure(
                     text=f"❌ Error: {e}", text_color=ERROR
                 ))
             finally:
-                self.after(0, lambda: self.btn_run_match.configure(
-                    state="normal", text="▶  Run Auto-Match"
+                self.after(0, lambda: self.btn_find_matches.configure(
+                    state="normal", text="🔍  Find Proposed Matches"
                 ))
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _show_match_results(self, result: dict):
+    def _show_proposals(self, result: dict):
         self.match_progress.set(1.0)
 
-        matched = result.get("matched", 0)
-        skipped = result.get("skipped", 0)
-        already = result.get("already_matched", 0)
-        total = result.get("total", 0)
-        errors = result.get("errors", 0)
+        proposals = result.get("proposals", [])
+        self._match_proposals = proposals
 
-        if errors > 0:
-            summary = f"⚠️ {matched} matched, {errors} errors, {skipped} skipped, {already} already matched (of {total})"
-            color = WARNING
-        elif matched > 0:
-            summary = f"✅ {matched} matched, {skipped} skipped, {already} already matched (of {total})"
-            color = SUCCESS
+        already_txns = result.get("already_matched_txns", 0)
+        already_invs = result.get("already_matched_invs", 0)
+        skipped_credits = result.get("skipped_credits", 0)
+        skipped_no_match = result.get("skipped_no_match", 0)
+        total_txns = result.get("total_txns", 0)
+        total_invs = result.get("total_invoices", 0)
+
+        # Summary status
+        if proposals:
+            self.lbl_match_status.configure(
+                text=f"✅ Found {len(proposals)} proposed match(es). Review below and confirm.",
+                text_color=SUCCESS,
+            )
         else:
-            summary = f"ℹ️ No new matches found. {skipped} skipped, {already} already matched (of {total})"
-            color = TEXT_DIM
+            self.lbl_match_status.configure(
+                text="ℹ️ No new matches found.",
+                text_color=TEXT_DIM,
+            )
 
-        self.lbl_match_status.configure(text=summary, text_color=color)
-
-        # Result cards
-        frame = self.match_results_frame
-
+        # Stats cards
+        frame = self.match_stats_frame
         stats = [
-            ("✅ Newly Matched", matched, SUCCESS),
-            ("⏭️ Skipped (no match / credit)", skipped, TEXT_DIM),
-            ("🔗 Already Matched", already, ACCENT),
-            ("❌ Errors", errors, ERROR),
+            ("📊 Total Transactions", str(total_txns), TEXT),
+            ("📄 Total Invoices", str(total_invs), TEXT),
+            ("🔗 Already Matched (txns)", str(already_txns), ACCENT),
+            ("🔗 Already Matched (invs)", str(already_invs), ACCENT),
+            ("⏭️ Credits Skipped", str(skipped_credits), TEXT_DIM),
+            ("❓ No Match Found", str(skipped_no_match), WARNING),
+            ("✨ New Matches", str(len(proposals)), SUCCESS),
         ]
 
-        for label, count, clr in stats:
-            row = ctk.CTkFrame(frame, fg_color=BG_CARD, corner_radius=8, height=50)
-            row.pack(fill="x", pady=4, padx=10)
-            row.pack_propagate(False)
+        stats_row = ctk.CTkFrame(frame, fg_color=BG_DARK)
+        stats_row.pack(fill="x", pady=(0, 10))
+
+        for i, (label, value, clr) in enumerate(stats):
+            card = ctk.CTkFrame(stats_row, fg_color=BG_CARD, corner_radius=8, width=140, height=60)
+            card.grid(row=i // 4, column=i % 4, padx=4, pady=4, sticky="ew")
+            card.pack_propagate(False)
+            ctk.CTkLabel(card, text=label, font=ctk.CTkFont(size=10), text_color=TEXT_DIM).pack(pady=(6, 0))
+            ctk.CTkLabel(card, text=value, font=ctk.CTkFont(size=16, weight="bold"), text_color=clr).pack()
+
+        for col in range(4):
+            stats_row.grid_columnconfigure(col, weight=1)
+
+        if not proposals:
+            return
+
+        # Action bar: Select All + Confirm button
+        bar = self.match_action_bar
+
+        self._match_select_all_var = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(
+            bar, text="Select All", variable=self._match_select_all_var,
+            command=self._toggle_select_all_matches,
+            font=ctk.CTkFont(size=13), text_color=TEXT,
+        ).pack(side="left", padx=(10, 20))
+
+        self.btn_confirm_matches = ctk.CTkButton(
+            bar, text=f"✅  Confirm & Write {len(proposals)} Match(es) to Airtable",
+            width=360, height=40,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            fg_color=SUCCESS, hover_color="#15803D",
+            command=self._confirm_matches,
+        )
+        self.btn_confirm_matches.pack(side="right", padx=10)
+
+        # Column headers
+        hdr = ctk.CTkFrame(self.match_proposals_frame, fg_color="#333355", corner_radius=6)
+        hdr.pack(fill="x", padx=10, pady=(10, 2))
+
+        for col_text, w in [("", 40), ("Bank Transaction", 250), ("Invoice", 250), ("Score", 80), ("Date Δ", 70)]:
             ctk.CTkLabel(
-                row, text=label, font=ctk.CTkFont(size=14), text_color=TEXT,
-            ).pack(side="left", padx=15, pady=10)
-            ctk.CTkLabel(
-                row, text=str(count), font=ctk.CTkFont(size=18, weight="bold"), text_color=clr,
-            ).pack(side="right", padx=15, pady=10)
+                hdr, text=col_text, font=ctk.CTkFont(size=11, weight="bold"),
+                text_color=TEXT_DIM, width=w,
+            ).pack(side="left", padx=6, pady=6)
+
+        # Proposal rows
+        self._match_checkboxes = []
+        for i, prop in enumerate(proposals):
+            self._build_proposal_row(i, prop)
+
+    def _build_proposal_row(self, idx: int, prop: dict):
+        txn = prop["txn"]
+        inv = prop["invoice"]
+        score = prop["score"]
+        date_diff = prop.get("date_diff")
+
+        row = ctk.CTkFrame(
+            self.match_proposals_frame,
+            fg_color=BG_CARD, corner_radius=6, height=52,
+        )
+        row.pack(fill="x", padx=10, pady=2)
+        row.pack_propagate(False)
+
+        # Checkbox
+        var = ctk.BooleanVar(value=True)
+        self._match_checkboxes.append(var)
+        ctk.CTkCheckBox(
+            row, text="", variable=var, width=30,
+            command=self._update_confirm_count,
+        ).pack(side="left", padx=(8, 4), pady=8)
+
+        # Bank transaction info
+        txn_text = f"{txn['description'][:30]}  •  €{txn['amount']:.2f}  •  {txn['date']}"
+        ctk.CTkLabel(
+            row, text=txn_text, font=ctk.CTkFont(size=12),
+            text_color=TEXT, width=250, anchor="w",
+        ).pack(side="left", padx=6)
+
+        # Arrow
+        ctk.CTkLabel(row, text="→", font=ctk.CTkFont(size=14), text_color=ACCENT, width=20).pack(side="left")
+
+        # Invoice info
+        inv_text = f"{inv['business_name'][:25]}  •  €{inv['total_inc_vat']:.2f}  •  {inv['invoice_date']}"
+        ctk.CTkLabel(
+            row, text=inv_text, font=ctk.CTkFont(size=12),
+            text_color=TEXT, width=250, anchor="w",
+        ).pack(side="left", padx=6)
+
+        # Score badge
+        score_pct = int(score * 100)
+        score_color = SUCCESS if score_pct >= 70 else (WARNING if score_pct >= 50 else ERROR)
+        ctk.CTkLabel(
+            row, text=f"{score_pct}%",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=score_color, width=60,
+        ).pack(side="left", padx=6)
+
+        # Date diff
+        dd_text = f"{date_diff}d" if date_diff is not None else "n/a"
+        dd_color = SUCCESS if date_diff is not None and date_diff <= 3 else (TEXT_DIM if date_diff is None else WARNING)
+        ctk.CTkLabel(
+            row, text=dd_text,
+            font=ctk.CTkFont(size=12),
+            text_color=dd_color, width=50,
+        ).pack(side="left", padx=6)
+
+    def _toggle_select_all_matches(self):
+        val = self._match_select_all_var.get()
+        for var in self._match_checkboxes:
+            var.set(val)
+        self._update_confirm_count()
+
+    def _update_confirm_count(self):
+        count = sum(1 for v in self._match_checkboxes if v.get())
+        self.btn_confirm_matches.configure(
+            text=f"✅  Confirm & Write {count} Match(es) to Airtable",
+            state="normal" if count > 0 else "disabled",
+        )
+
+    # ------------------------------------------------------------------
+    # Step 2: Confirm and write matches to Airtable
+    # ------------------------------------------------------------------
+
+    def _confirm_matches(self):
+        selected = [
+            self._match_proposals[i]
+            for i, var in enumerate(self._match_checkboxes) if var.get()
+        ]
+        if not selected:
+            return
+
+        self.btn_confirm_matches.configure(state="disabled", text="⏳  Writing to Airtable...")
+        self.btn_find_matches.configure(state="disabled")
+        self.match_progress.set(0)
+
+        def _progress(done, total, msg):
+            if total > 0:
+                self.after(0, lambda: self.match_progress.set(done / total))
+            self.after(0, lambda m=msg: self.lbl_match_status.configure(text=m, text_color=TEXT_DIM))
+
+        def _worker():
+            from src.airtable_client import commit_matches
+            try:
+                result = commit_matches(selected, progress_callback=_progress)
+                committed = result.get("committed", 0)
+                errs = result.get("errors", 0)
+                if errs > 0:
+                    msg = f"⚠️ {committed} linked, {errs} errors"
+                    clr = WARNING
+                else:
+                    msg = f"✅ Successfully linked {committed} match(es) in Airtable!"
+                    clr = SUCCESS
+                self.after(0, lambda: self.lbl_match_status.configure(text=msg, text_color=clr))
+                self.after(0, lambda: self.match_progress.set(1.0))
+            except Exception as e:
+                self.after(0, lambda: self.lbl_match_status.configure(
+                    text=f"❌ Error: {e}", text_color=ERROR
+                ))
+            finally:
+                self.after(0, lambda: self.btn_find_matches.configure(state="normal"))
+                self.after(0, lambda: self.btn_confirm_matches.configure(
+                    state="normal",
+                    text=f"✅  Confirm & Write {len(selected)} Match(es) to Airtable",
+                ))
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     # ------------------------------------------------------------------
     # Open file for manual review
