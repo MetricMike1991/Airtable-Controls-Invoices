@@ -442,27 +442,41 @@ class InvoiceUploaderApp(ctk.CTk):
         header = ctk.CTkFrame(container, fg_color="#333355", corner_radius=8)
         header._is_data_row = True
         header.pack(fill="x", pady=(0, 4))
-        for col, w in [("Business Name", 220), ("Invoice #", 130), ("Date", 110), ("Total", 120), ("File", 200)]:
+        for col, w in [("Business Name", 200), ("Invoice #", 110), ("Date", 100), ("Total", 100), ("Matched", 80), ("File", 180)]:
             ctk.CTkLabel(
                 header, text=col, width=w,
                 font=ctk.CTkFont(size=12, weight="bold"), text_color=TEXT,
             ).pack(side="left", padx=6, pady=8)
 
         for inv in invoices:
+            linked = inv.get("linked_bank_txn_ids", [])
+            is_matched = len(linked) > 0
+            match_text = f"✅ {len(linked)}" if is_matched else "❌"
+            match_color = SUCCESS if is_matched else TEXT_DIM
+
             row = ctk.CTkFrame(container, fg_color=BG_CARD, corner_radius=8)
             row._is_data_row = True
             row.pack(fill="x", pady=2)
             for val, w in [
-                (inv.get("business_name", ""), 220),
-                (inv.get("invoice_number", ""), 130),
-                (inv.get("invoice_date", ""), 110),
-                (inv.get("total_display", ""), 120),
-                (inv.get("file_name", ""), 200),
+                (inv.get("business_name", ""), 200),
+                (inv.get("invoice_number", ""), 110),
+                (inv.get("invoice_date", ""), 100),
+                (inv.get("total_display", ""), 100),
             ]:
                 ctk.CTkLabel(
-                    row, text=str(val)[:40], width=w,
+                    row, text=str(val)[:35], width=w,
                     font=ctk.CTkFont(size=12), text_color=TEXT,
                 ).pack(side="left", padx=6, pady=8)
+
+            ctk.CTkLabel(
+                row, text=match_text, width=80,
+                font=ctk.CTkFont(size=12, weight="bold"), text_color=match_color,
+            ).pack(side="left", padx=6, pady=8)
+
+            ctk.CTkLabel(
+                row, text=str(inv.get("file_name", ""))[:30], width=180,
+                font=ctk.CTkFont(size=12), text_color=TEXT,
+            ).pack(side="left", padx=6, pady=8)
 
     # ------------------------------------------------------------------
     # Actions
