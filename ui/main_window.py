@@ -68,6 +68,9 @@ class InvoiceUploaderApp(ctk.CTk):
         self._parsed_sources: dict[str, str] = {}  # filepath -> source type
         self._bank_edit_rows: dict[str, list[dict]] = {}  # filepath -> list of row widgets
 
+        # Active tab tracker
+        self._active_tab: str = "upload"
+
         # Layout
         self._build_sidebar()
         self._build_main_area()
@@ -136,6 +139,13 @@ class InvoiceUploaderApp(ctk.CTk):
         self.sidebar_spacer = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         self.sidebar_spacer.pack(fill="both", expand=True)
 
+        self.btn_sync = ctk.CTkButton(
+            self.sidebar, text="🔄  Sync Airtable", width=190, height=36,
+            fg_color="#1E6F50", hover_color="#16A34A",
+            command=self._sync_airtable,
+        )
+        self.btn_sync.pack(pady=(0, 6))
+
         self.btn_test = ctk.CTkButton(
             self.sidebar, text="🔌  Test Connection", width=190, height=36,
             fg_color="#333355", hover_color="#444466",
@@ -172,6 +182,7 @@ class InvoiceUploaderApp(ctk.CTk):
     def _show_upload_tab(self):
         self._clear_main()
         self._set_active_nav(self.btn_upload)
+        self._active_tab = "upload"
 
         container = ctk.CTkScrollableFrame(self.main_frame, fg_color=BG_DARK)
         container.pack(fill="both", expand=True, padx=20, pady=20)
@@ -305,6 +316,7 @@ class InvoiceUploaderApp(ctk.CTk):
     def _show_history_tab(self):
         self._clear_main()
         self._set_active_nav(self.btn_history)
+        self._active_tab = "history"
 
         container = ctk.CTkScrollableFrame(self.main_frame, fg_color=BG_DARK)
         container.pack(fill="both", expand=True, padx=20, pady=20)
@@ -360,6 +372,7 @@ class InvoiceUploaderApp(ctk.CTk):
     def _show_browse_tab(self):
         self._clear_main()
         self._set_active_nav(self.btn_browse)
+        self._active_tab = "browse"
 
         container = ctk.CTkScrollableFrame(self.main_frame, fg_color=BG_DARK)
         container.pack(fill="both", expand=True, padx=20, pady=20)
@@ -739,6 +752,7 @@ class InvoiceUploaderApp(ctk.CTk):
     def _show_bank_tab(self):
         self._clear_main()
         self._set_active_nav(self.btn_bank)
+        self._active_tab = "bank"
 
         container = ctk.CTkScrollableFrame(self.main_frame, fg_color=BG_DARK)
         container.pack(fill="both", expand=True, padx=20, pady=20)
@@ -1230,6 +1244,7 @@ class InvoiceUploaderApp(ctk.CTk):
     def _show_match_tab(self):
         self._clear_main()
         self._set_active_nav(self.btn_match)
+        self._active_tab = "match"
 
         # State for this tab
         self._match_proposals: list[dict] = []
@@ -1542,6 +1557,33 @@ class InvoiceUploaderApp(ctk.CTk):
                 os.startfile(filepath)
             except Exception as e:
                 messagebox.showerror("Error", f"Could not open file:\n{e}")
+
+    # ------------------------------------------------------------------
+    # Sync Airtable (refresh current tab)
+    # ------------------------------------------------------------------
+
+    def _sync_airtable(self):
+        """Re-fetch data from Airtable and refresh the current tab."""
+        self.btn_sync.configure(state="disabled", text="⏳  Syncing...")
+
+        tab_map = {
+            "upload": self._show_upload_tab,
+            "history": self._show_history_tab,
+            "browse": self._show_browse_tab,
+            "bank": self._show_bank_tab,
+            "match": self._show_match_tab,
+        }
+
+        show_fn = tab_map.get(self._active_tab, self._show_browse_tab)
+
+        # Invalidate cached Airtable table handle so fresh data is fetched
+        import src.airtable_client as _ac
+        _ac._cached_table = None
+
+        try:
+            show_fn()
+        finally:
+            self.btn_sync.configure(state="normal", text="🔄  Sync Airtable")
 
     # ------------------------------------------------------------------
     # Connection test
