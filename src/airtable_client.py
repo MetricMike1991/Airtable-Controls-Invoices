@@ -349,6 +349,7 @@ def fetch_all_bank_transactions() -> list[dict]:
     result = []
     for r in records:
         f = r.get("fields", {})
+        matched_inv = f.get("Matched Invoice", [])
         result.append({
             "airtable_id": r["id"],
             "date": str(f.get("Date", "")),
@@ -357,5 +358,186 @@ def fetch_all_bank_transactions() -> list[dict]:
             "type": str(f.get("Type", "Debit")),
             "source": str(f.get("Source", "")),
             "source_file": str(f.get("Source File", "")),
+            "matched_invoice_ids": [x if isinstance(x, str) else x.get("id", "") for x in matched_inv] if isinstance(matched_inv, list) else [],
         })
     return result
+
+
+def auto_match_invoices(
+    progress_callback=None,
+) -> dict:
+    """
+    Auto-match invoices to bank transactions by amount.
+
+    For each unmatched Debit bank transaction, find an invoice with matching
+    'Total Invoice Including VAT'. If an exact amount match is found, link
+    them via the 'Matched Invoice' field on the bank transaction and the
+    'Bank Transactions' field on the invoice.
+
+    Returns dict: {matched, skipped, already_matched, total, errors}.
+    """
+    import re
+
+    bank_table = _get_bank_txn_table()
+    invoice_table = _get_table()
+
+    if progress_callback:
+        progress_callback(0, 0, "Fetching invoices from Airtable...")
+
+    invoices = fetch_all_invoices()
+    if not invoices:
+        return {"matched": 0, "skipped": 0, "already_matched": 0, "total": 0, "errors": 0}
+
+    if progress_callback:
+        progress_callback(0, 0, "Fetching bank transactions from Airtable...")
+
+    bank_txns = fetch_all_bank_transactions()
+    total = len(bank_txns)
+
+    if progress_callback:
+        progress_callback(0, total, f"Matching {total} transactions against {len(invoices)} invoices...")
+
+    # Helper: normalise name for comparison
+    def _norm(name: str) -> str:
+        s = re.sub(r"[^a-z0-9\s]", "", name.lower())
+        return " ".join(s.split())
+
+    def _word_score(a: str, b: str) -> float:
+        wa = set(_norm(a).split())
+        wb = set(_norm(b).split())
+        if not wa or not wb:
+            return 0.0
+        na, nb = _norm(a), _norm(b)
+        if na in nb or nb in na:
+            return 0.9
+        inter = wa & wb
+        if not inter:
+            return 0.0
+        return 2 * len(inter) / (len(wa) + len(wb))
+
+    matched = 0
+    skipped = 0
+    already_matched = 0
+    errors = 0
+
+    # Collect updates to batch
+    bank_updates: list[dict] = []
+    invoice_updates: dict[str, list[str]] = {}  # invoice_id -> list of bank_txn_ids
+
+    for i, txn in enumerate(bank_txns):
+        # Skip if already matched
+        if txn.get("matched_invoice_ids"):
+            already_matched += 1
+            if progress_callback:
+                progress_callback(i + 1, total, f"#{i+1}/{total} — already matched")
+            continue
+
+        # Only match debits
+        if txn.get("type", "Debit") != "Debit":
+            skipped += 1
+            if progress_callback:
+                progress_callback(i + 1, total, f"#{i+1}/{total} — credit, skipped")
+            continue
+
+        txn_amount = txn["amount"]
+        txn_desc = txn["description"]
+
+        # Find best matching invoice by amount + name similarity
+        best_inv = None
+        best_score = 0.0
+
+        for inv in invoices:
+            inv_total = float(inv.get("total_inc_vat", 0) or 0)
+            inv_name = str(inv.get("business_name", ""))
+
+            # Amount must be within 1% or €1
+            amount_diff = abs(txn_amount - inv_total)
+            if inv_total > 0 and amount_diff > max(inv_total * 0.01, 1.0):
+                continue
+
+            # Score: exact amount match is top priority, name similarity is bonus
+            amount_score = max(0, 1.0 - (amount_diff / max(inv_total, 0.01))) if inv_total > 0 else 0.0
+            name_score = _word_score(txn_desc, inv_name)
+            overall = 0.7 * amount_score + 0.3 * name_score
+
+            # Strong boost for exact match
+            if amount_diff < 0.01:
+                overall = min(1.0, overall + 0.3)
+
+            if overall > best_score:
+                best_score = overall
+                best_inv = inv
+
+        if best_inv and best_score >= 0.50:
+            bank_updates.append({
+                "id": txn["airtable_id"],
+                "fields": {"Matched Invoice": [best_inv["id"]]},
+            })
+
+            # Track invoice side link
+            if best_inv["id"] not in invoice_updates:
+                invoice_updates[best_inv["id"]] = []
+            invoice_updates[best_inv["id"]].append(txn["airtable_id"])
+
+            matched += 1
+            if progress_callback:
+                progress_callback(
+                    i + 1, total,
+                    f"#{i+1}/{total} — matched: {txn_desc[:25]} → {best_inv['business_name'][:20]} (€{txn_amount:.2f}, {int(best_score*100)}%)"
+                )
+        else:
+            skipped += 1
+            if progress_callback:
+                progress_callback(i + 1, total, f"#{i+1}/{total} — no match (€{txn_amount:.2f})")
+
+        # Flush bank updates in batches of 10
+        if len(bank_updates) >= 10:
+            try:
+                bank_table.batch_update(bank_updates, typecast=True)
+            except Exception as e:
+                print(f"[AIRTABLE] Batch update error: {e}")
+                errors += len(bank_updates)
+                matched -= len(bank_updates)
+            bank_updates = []
+
+    # Flush remaining bank updates
+    if bank_updates:
+        try:
+            bank_table.batch_update(bank_updates, typecast=True)
+        except Exception as e:
+            print(f"[AIRTABLE] Batch update error: {e}")
+            errors += len(bank_updates)
+            matched -= len(bank_updates)
+
+    # Update invoice side: link bank transactions
+    if progress_callback:
+        progress_callback(total, total, "Updating invoice links...")
+
+    inv_batch: list[dict] = []
+    for inv_id, txn_ids in invoice_updates.items():
+        inv_batch.append({
+            "id": inv_id,
+            "fields": {"Bank Transactions": txn_ids},
+        })
+        if len(inv_batch) >= 10:
+            try:
+                invoice_table.batch_update(inv_batch, typecast=True)
+            except Exception as e:
+                print(f"[AIRTABLE] Invoice link update error: {e}")
+                errors += len(inv_batch)
+            inv_batch = []
+
+    if inv_batch:
+        try:
+            invoice_table.batch_update(inv_batch, typecast=True)
+        except Exception as e:
+            print(f"[AIRTABLE] Invoice link update error: {e}")
+            errors += len(inv_batch)
+
+    return {
+        "matched": matched,
+        "skipped": skipped,
+        "already_matched": already_matched,
+        "total": total,
+        "errors": errors,
+    }

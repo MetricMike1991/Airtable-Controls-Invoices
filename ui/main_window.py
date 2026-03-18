@@ -125,6 +125,13 @@ class InvoiceUploaderApp(ctk.CTk):
         )
         self.btn_bank.pack(pady=4)
 
+        self.btn_match = ctk.CTkButton(
+            self.sidebar, text="🔗  Match Invoices", width=190, height=40,
+            fg_color="transparent", hover_color="#333355",
+            command=self._show_match_tab,
+        )
+        self.btn_match.pack(pady=4)
+
         # Connection test at bottom
         self.sidebar_spacer = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         self.sidebar_spacer.pack(fill="both", expand=True)
@@ -155,7 +162,7 @@ class InvoiceUploaderApp(ctk.CTk):
             w.destroy()
 
     def _set_active_nav(self, active_btn):
-        for btn in (self.btn_upload, self.btn_history, self.btn_browse, self.btn_bank):
+        for btn in (self.btn_upload, self.btn_history, self.btn_browse, self.btn_bank, self.btn_match):
             btn.configure(fg_color="transparent" if btn != active_btn else ACCENT)
 
     # ------------------------------------------------------------------
@@ -1215,6 +1222,125 @@ class InvoiceUploaderApp(ctk.CTk):
         self._parsed_transactions.clear()
         self._parsed_sources.clear()
         self._bank_edit_rows.clear()
+
+    # ------------------------------------------------------------------
+    # Tab: Match Invoices
+    # ------------------------------------------------------------------
+
+    def _show_match_tab(self):
+        self._clear_main()
+        self._set_active_nav(self.btn_match)
+
+        container = ctk.CTkScrollableFrame(self.main_frame, fg_color=BG_DARK)
+        container.pack(fill="both", expand=True, padx=20, pady=20)
+
+        ctk.CTkLabel(
+            container, text="🔗  Match Invoices to Bank Transactions",
+            font=ctk.CTkFont(size=24, weight="bold"), text_color=TEXT,
+        ).pack(anchor="w", pady=(0, 5))
+
+        ctk.CTkLabel(
+            container,
+            text="Automatically match invoices to bank transactions by amount.\n"
+                 "Debit transactions are compared against invoice totals (inc. VAT).\n"
+                 "Matched records are linked in both the Invoices and Bank Transactions tables.",
+            font=ctk.CTkFont(size=13), text_color=TEXT_DIM, justify="left",
+        ).pack(anchor="w", pady=(0, 20))
+
+        # Run button
+        self.btn_run_match = ctk.CTkButton(
+            container, text="▶  Run Auto-Match", width=280, height=44,
+            font=ctk.CTkFont(size=15, weight="bold"),
+            fg_color=ACCENT, hover_color="#1D4ED8",
+            command=self._run_matching,
+        )
+        self.btn_run_match.pack(pady=(0, 15))
+
+        # Progress
+        self.match_progress = ctk.CTkProgressBar(container, width=500, height=14)
+        self.match_progress.pack(pady=(0, 5))
+        self.match_progress.set(0)
+
+        self.lbl_match_status = ctk.CTkLabel(
+            container, text="Ready — press Run to start matching.",
+            font=ctk.CTkFont(size=12), text_color=TEXT_DIM,
+        )
+        self.lbl_match_status.pack(pady=(0, 20))
+
+        # Results area (populated after matching)
+        self.match_results_frame = ctk.CTkFrame(container, fg_color=BG_DARK)
+        self.match_results_frame.pack(fill="both", expand=True)
+
+    def _run_matching(self):
+        self.btn_run_match.configure(state="disabled", text="⏳  Matching...")
+        self.match_progress.set(0)
+        self.lbl_match_status.configure(text="Fetching data from Airtable...", text_color=TEXT_DIM)
+        # Clear previous results
+        for w in self.match_results_frame.winfo_children():
+            w.destroy()
+
+        def _progress(done, total, msg):
+            if total > 0:
+                self.after(0, lambda: self.match_progress.set(done / total))
+            self.after(0, lambda m=msg: self.lbl_match_status.configure(text=m, text_color=TEXT_DIM))
+
+        def _worker():
+            from src.airtable_client import auto_match_invoices
+            try:
+                result = auto_match_invoices(progress_callback=_progress)
+                self.after(0, lambda: self._show_match_results(result))
+            except Exception as e:
+                self.after(0, lambda: self.lbl_match_status.configure(
+                    text=f"❌ Error: {e}", text_color=ERROR
+                ))
+            finally:
+                self.after(0, lambda: self.btn_run_match.configure(
+                    state="normal", text="▶  Run Auto-Match"
+                ))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _show_match_results(self, result: dict):
+        self.match_progress.set(1.0)
+
+        matched = result.get("matched", 0)
+        skipped = result.get("skipped", 0)
+        already = result.get("already_matched", 0)
+        total = result.get("total", 0)
+        errors = result.get("errors", 0)
+
+        if errors > 0:
+            summary = f"⚠️ {matched} matched, {errors} errors, {skipped} skipped, {already} already matched (of {total})"
+            color = WARNING
+        elif matched > 0:
+            summary = f"✅ {matched} matched, {skipped} skipped, {already} already matched (of {total})"
+            color = SUCCESS
+        else:
+            summary = f"ℹ️ No new matches found. {skipped} skipped, {already} already matched (of {total})"
+            color = TEXT_DIM
+
+        self.lbl_match_status.configure(text=summary, text_color=color)
+
+        # Result cards
+        frame = self.match_results_frame
+
+        stats = [
+            ("✅ Newly Matched", matched, SUCCESS),
+            ("⏭️ Skipped (no match / credit)", skipped, TEXT_DIM),
+            ("🔗 Already Matched", already, ACCENT),
+            ("❌ Errors", errors, ERROR),
+        ]
+
+        for label, count, clr in stats:
+            row = ctk.CTkFrame(frame, fg_color=BG_CARD, corner_radius=8, height=50)
+            row.pack(fill="x", pady=4, padx=10)
+            row.pack_propagate(False)
+            ctk.CTkLabel(
+                row, text=label, font=ctk.CTkFont(size=14), text_color=TEXT,
+            ).pack(side="left", padx=15, pady=10)
+            ctk.CTkLabel(
+                row, text=str(count), font=ctk.CTkFont(size=18, weight="bold"), text_color=clr,
+            ).pack(side="right", padx=15, pady=10)
 
     # ------------------------------------------------------------------
     # Open file for manual review
