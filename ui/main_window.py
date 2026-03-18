@@ -17,6 +17,8 @@ from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
+import webbrowser
+
 import customtkinter as ctk
 from dotenv import load_dotenv
 
@@ -537,10 +539,16 @@ class InvoiceUploaderApp(ctk.CTk):
                 header_row, text=f"📄 {name}",
                 font=ctk.CTkFont(size=14, weight="bold"), text_color=TEXT,
             ).pack(side="left")
+            ctk.CTkButton(
+                header_row, text="👁  Open File", width=110, height=30,
+                fg_color="#555566", hover_color="#666677",
+                font=ctk.CTkFont(size=12),
+                command=lambda p=fp: self._open_file(p),
+            ).pack(side="right", padx=(0, 10))
             ctk.CTkLabel(
                 header_row, text=f"Confidence: {data.confidence.upper()}",
                 font=ctk.CTkFont(size=12, weight="bold"), text_color=conf_color,
-            ).pack(side="right")
+            ).pack(side="right", padx=(0, 10))
 
             # Editable fields
             fields_frame = ctk.CTkFrame(card, fg_color="transparent")
@@ -662,6 +670,23 @@ class InvoiceUploaderApp(ctk.CTk):
         # Clear extracted data so they aren't re-uploaded
         self._selected_files.clear()
         self._extracted_data.clear()
+
+    # ------------------------------------------------------------------
+    # Open file for manual review
+    # ------------------------------------------------------------------
+
+    def _open_file(self, filepath: str):
+        """Open the invoice file in the default system viewer / browser."""
+        try:
+            # file:// URL opens in default browser for PDFs/images
+            url = Path(filepath).as_uri()
+            webbrowser.open(url)
+        except Exception:
+            # Fallback: use os.startfile on Windows
+            try:
+                os.startfile(filepath)
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not open file:\n{e}")
 
     # ------------------------------------------------------------------
     # Connection test
