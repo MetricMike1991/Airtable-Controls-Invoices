@@ -1056,23 +1056,24 @@ class InvoiceUploaderApp(ctk.CTk):
                 amt_entry.insert(0, f"{txn.get('amount', 0):.2f}")
                 amt_entry.pack(side="left", padx=4, pady=4)
 
-                # Type dropdown (editable)
-                txn_type = txn.get("type", "Debit")
-                type_var = ctk.StringVar(value=txn_type)
-                type_menu = ctk.CTkOptionMenu(
-                    row_frame, variable=type_var,
-                    values=["Debit", "Credit"],
-                    width=90, height=28,
-                    fg_color=ERROR if txn_type == "Debit" else SUCCESS,
-                    button_color="#444466",
-                    button_hover_color="#555577",
+                # Type toggle button (click to swap Debit ↔ Credit)
+                type_var = ctk.StringVar(value="Debit")
+                type_btn = ctk.CTkButton(
+                    row_frame, text="Debit", width=90, height=28,
+                    fg_color=ERROR, hover_color="#B91C1C",
                     font=ctk.CTkFont(size=11, weight="bold"),
                 )
-                # Update colour when type changes
-                def _on_type_change(val, menu=type_menu):
-                    menu.configure(fg_color=ERROR if val == "Debit" else SUCCESS)
-                type_var.trace_add("write", lambda *_, v=type_var, m=type_menu: _on_type_change(v.get(), m))
-                type_menu.pack(side="left", padx=4, pady=4)
+
+                def _toggle_type(var=type_var, btn=type_btn):
+                    if var.get() == "Debit":
+                        var.set("Credit")
+                        btn.configure(text="Credit", fg_color=SUCCESS, hover_color="#15803D")
+                    else:
+                        var.set("Debit")
+                        btn.configure(text="Debit", fg_color=ERROR, hover_color="#B91C1C")
+
+                type_btn.configure(command=_toggle_type)
+                type_btn.pack(side="left", padx=4, pady=4)
 
                 edit_rows.append({
                     "include": include_var,
