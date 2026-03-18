@@ -573,6 +573,34 @@ class InvoiceUploaderApp(ctk.CTk):
                 entry.grid(row=row_idx, column=1, sticky="w", padx=(10, 0), pady=3)
                 entries[label] = entry
 
+            # Additional Notes
+            next_row = 4
+            ctk.CTkLabel(
+                fields_frame, text="Additional Notes",
+                font=ctk.CTkFont(size=11), text_color=TEXT_DIM, width=180,
+            ).grid(row=next_row, column=0, sticky="nw", pady=3)
+            notes_entry = ctk.CTkTextbox(
+                fields_frame, width=320, height=70,
+                fg_color="#1E1E2E", border_color="#555566",
+                font=ctk.CTkFont(size=12),
+            )
+            notes_entry.grid(row=next_row, column=1, sticky="w", padx=(10, 0), pady=3)
+            entries["Additional Notes"] = notes_entry
+
+            # Manually Reviewed & Verified checkbox
+            reviewed_var = ctk.BooleanVar(value=False)
+            reviewed_cb = ctk.CTkCheckBox(
+                fields_frame, text="  Manually Reviewed & Verified",
+                variable=reviewed_var,
+                font=ctk.CTkFont(size=13, weight="bold"),
+                text_color=TEXT,
+                fg_color=SUCCESS, hover_color="#15803D",
+                border_color="#555566",
+                checkbox_width=22, checkbox_height=22,
+            )
+            reviewed_cb.grid(row=next_row + 1, column=0, columnspan=2, sticky="w", pady=(10, 4))
+            entries["Reviewed"] = reviewed_var
+
             self._edit_entries[fp] = entries
 
     def _upload_all(self):
@@ -604,7 +632,17 @@ class InvoiceUploaderApp(ctk.CTk):
                 data.invoice_number = entries.get("Invoice Number", data.invoice_number)
                 if hasattr(data.invoice_number, "get"):
                     data.invoice_number = data.invoice_number.get()
-            upload_items.append((fp, data))
+
+            # Read additional fields
+            notes_widget = entries.get("Additional Notes")
+            notes_text = ""
+            if notes_widget and hasattr(notes_widget, "get"):
+                notes_text = notes_widget.get("1.0", "end").strip()
+
+            reviewed_var = entries.get("Reviewed")
+            reviewed = reviewed_var.get() if reviewed_var else False
+
+            upload_items.append((fp, data, notes_text, reviewed))
 
         if not upload_items:
             self.btn_upload_all.configure(state="normal", text="☁️  Upload All to Airtable")
@@ -618,14 +656,14 @@ class InvoiceUploaderApp(ctk.CTk):
             uploaded = 0
             failed = 0
 
-            for i, (fp, data) in enumerate(upload_items):
+            for i, (fp, data, notes, reviewed) in enumerate(upload_items):
                 name = Path(fp).name
                 self.after(0, lambda n=name, idx=i: self.lbl_upload_status.configure(
                     text=f"Uploading {idx + 1}/{total}: {n}..."
                 ))
 
                 try:
-                    upload_invoice(data, fp)
+                    upload_invoice(data, fp, notes=notes, reviewed=reviewed)
                     uploaded += 1
                     self._upload_history.append({
                         "file": name,

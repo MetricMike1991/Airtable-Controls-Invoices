@@ -14,6 +14,8 @@ Expected Airtable table columns:
   • Invoice Number             (Single line text)
   • File Name                  (Single line text)
   • Invoice Attachement        (Attachment)
+  • Manually Reviewed          (Checkbox)
+  • Additional Notes           (Long text)
 """
 
 from __future__ import annotations
@@ -69,6 +71,8 @@ def reset_table_cache():
 def upload_invoice(
     invoice_data: InvoiceData,
     filepath: str | Path,
+    notes: str = "",
+    reviewed: bool = False,
 ) -> dict:
     """
     Create a record in Airtable with the extracted invoice data.
@@ -94,6 +98,11 @@ def upload_invoice(
 
     if invoice_data.invoice_number:
         fields["Invoice Number"] = invoice_data.invoice_number.strip()
+
+    # Reviewed checkbox & notes
+    fields["Manually Reviewed"] = reviewed
+    if notes:
+        fields["Additional Notes"] = notes.strip()
 
     # Read file for attachment
     mime_type = mimetypes.guess_type(str(filepath))[0] or "application/octet-stream"
