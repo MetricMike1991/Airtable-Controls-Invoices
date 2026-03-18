@@ -1056,20 +1056,30 @@ class InvoiceUploaderApp(ctk.CTk):
                 amt_entry.insert(0, f"{txn.get('amount', 0):.2f}")
                 amt_entry.pack(side="left", padx=4, pady=4)
 
-                # Type label
+                # Type dropdown (editable)
                 txn_type = txn.get("type", "Debit")
-                type_color = ERROR if txn_type == "Debit" else SUCCESS
-                ctk.CTkLabel(
-                    row_frame, text=txn_type, width=70,
-                    font=ctk.CTkFont(size=11, weight="bold"), text_color=type_color,
-                ).pack(side="left", padx=4, pady=4)
+                type_var = ctk.StringVar(value=txn_type)
+                type_menu = ctk.CTkOptionMenu(
+                    row_frame, variable=type_var,
+                    values=["Debit", "Credit"],
+                    width=90, height=28,
+                    fg_color=ERROR if txn_type == "Debit" else SUCCESS,
+                    button_color="#444466",
+                    button_hover_color="#555577",
+                    font=ctk.CTkFont(size=11, weight="bold"),
+                )
+                # Update colour when type changes
+                def _on_type_change(val, menu=type_menu):
+                    menu.configure(fg_color=ERROR if val == "Debit" else SUCCESS)
+                type_var.trace_add("write", lambda *_, v=type_var, m=type_menu: _on_type_change(v.get(), m))
+                type_menu.pack(side="left", padx=4, pady=4)
 
                 edit_rows.append({
                     "include": include_var,
                     "date": date_entry,
                     "description": desc_entry,
                     "amount": amt_entry,
-                    "type": txn_type,
+                    "type": type_var,
                 })
 
             self._bank_edit_rows[fp] = edit_rows
@@ -1103,7 +1113,7 @@ class InvoiceUploaderApp(ctk.CTk):
                     "date": row["date"].get().strip(),
                     "description": row["description"].get().strip(),
                     "amount": amount,
-                    "type": row["type"],
+                    "type": row["type"].get() if hasattr(row["type"], "get") else row["type"],
                 })
 
             if txns:
