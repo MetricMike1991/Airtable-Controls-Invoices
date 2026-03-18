@@ -109,8 +109,8 @@ def upload_invoice(
     with open(str(filepath), "rb") as f:
         file_content = f.read()
 
-    # Create the record
-    record = table.create(fields)
+    # Create the record (typecast=True lets Airtable auto-create/convert fields)
+    record = table.create(fields, typecast=True)
     record_id = record["id"]
 
     # Attach the original file (column: "Invoice Attachement")
