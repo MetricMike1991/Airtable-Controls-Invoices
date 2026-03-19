@@ -786,7 +786,29 @@ class InvoiceUploaderApp(ctk.CTk):
         ctk.CTkLabel(
             container, text="Upload BOI or SumUp bank statements → Parse transactions → Review → Upload to Airtable",
             font=ctk.CTkFont(size=13), text_color=TEXT_DIM, wraplength=700,
-        ).pack(anchor="w", pady=(0, 20))
+        ).pack(anchor="w", pady=(0, 12))
+
+        # ---- SumUp Instructions Tooltip ----
+        tip_frame = ctk.CTkFrame(container, fg_color="#3B3000", corner_radius=10, border_width=2, border_color="#FACC15")
+        tip_frame.pack(fill="x", pady=(0, 20))
+
+        ctk.CTkLabel(
+            tip_frame, text="💡  SumUp Bank Export Instructions",
+            font=ctk.CTkFont(size=14, weight="bold"), text_color="#FACC15",
+        ).pack(anchor="w", padx=16, pady=(12, 4))
+
+        tip_text = (
+            "1.  Go to  https://me.sumup.com/en-ie/business-account\n"
+            "2.  Select the date range and export all transaction data (Account View CSV)\n"
+            "3.  Upload CSV to Google Drive → Open as Google Sheets\n"
+            "4.  Copy the values from the 'Reference' column into the 'Transaction code' column\n"
+            "5.  Download as Excel (.xlsx) and upload here"
+        )
+        ctk.CTkLabel(
+            tip_frame, text=tip_text,
+            font=ctk.CTkFont(size=12), text_color="#FDE68A",
+            wraplength=650, justify="left",
+        ).pack(anchor="w", padx=16, pady=(0, 12))
 
         # ---- Step 1: File selection ----
         step1 = ctk.CTkFrame(container, fg_color=BG_CARD, corner_radius=12)

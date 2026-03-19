@@ -194,12 +194,18 @@ def _parse_sumup_bank(df: pd.DataFrame) -> list[dict]:
       Transaction date | Transaction code | Reference | Amount | Available balance
 
     Negative Amount = Debit, Positive Amount = Credit.
+    Description is ALWAYS taken from the Reference column.
     """
-    date_col = _find_col(df, "transaction date", "date")
-    code_col = _find_col(df, "transaction code", "code")
-    ref_col = _find_col(df, "reference", "ref")
-    amount_col = _find_col(df, "amount")
-    balance_col = _find_col(df, "available balance", "balance")
+    # Build exact lookup using normalised column names (strips all non-alphanumeric)
+    col_lookup = {}
+    for c in df.columns:
+        key = _normalise_col(c)
+        col_lookup[key] = c
+
+    date_col = col_lookup.get("transactiondate")
+    code_col = col_lookup.get("transactioncode")
+    ref_col = col_lookup.get("reference")
+    amount_col = col_lookup.get("amount")
 
     results = []
     for _, row in df.iterrows():
@@ -231,6 +237,7 @@ def _parse_sumup_bank(df: pd.DataFrame) -> list[dict]:
         else:
             desc = str(raw_ref).strip()
 
+        # Transaction code goes into the reference field (not description)
         raw_code = row.get(code_col) if code_col else None
         if pd.isna(raw_code) or str(raw_code).strip() in ("", "nan", "None"):
             code = ""
