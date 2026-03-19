@@ -68,6 +68,9 @@ class InvoiceUploaderApp(ctk.CTk):
         self._parsed_sources: dict[str, str] = {}  # filepath -> source type
         self._bank_edit_rows: dict[str, list[dict]] = {}  # filepath -> list of row widgets
 
+        # Rejected match pairs — persists across Find Matches runs within session
+        self._rejected_matches: set[tuple[str, str]] = set()  # (invoice_id, txn_id)
+
         # Active tab tracker
         self._active_tab: str = "upload"
 
@@ -1436,6 +1439,11 @@ class InvoiceUploaderApp(ctk.CTk):
         self.match_progress.set(1.0)
 
         proposals = result.get("proposals", [])
+        # Filter out previously rejected matches
+        proposals = [
+            p for p in proposals
+            if (p["invoice"]["id"], p["txn"]["airtable_id"]) not in self._rejected_matches
+        ]
         self._match_proposals = proposals
 
         already_txns = result.get("already_matched_txns", 0)
@@ -1508,7 +1516,7 @@ class InvoiceUploaderApp(ctk.CTk):
         hdr = ctk.CTkFrame(self.match_proposals_frame, fg_color="#333355", corner_radius=6)
         hdr.pack(fill="x", padx=10, pady=(10, 2))
 
-        for col_text, w in [("", 40), ("Bank Transaction", 250), ("Invoice", 250), ("Score", 80), ("Date Δ", 70)]:
+        for col_text, w in [("", 40), ("Bank Transaction", 250), ("Invoice", 250), ("Score", 80), ("Date Δ", 70), ("", 40)]:
             ctk.CTkLabel(
                 hdr, text=col_text, font=ctk.CTkFont(size=11, weight="bold"),
                 text_color=TEXT_DIM, width=w,
@@ -1575,6 +1583,39 @@ class InvoiceUploaderApp(ctk.CTk):
             text_color=dd_color, width=50,
         ).pack(side="left", padx=6)
 
+        # Reject button — "Not a match"
+        def _reject(index=idx, row_widget=row, proposal=prop):
+            inv_id = proposal["invoice"]["id"]
+            txn_id = proposal["txn"]["airtable_id"]
+            self._rejected_matches.add((inv_id, txn_id))
+            row_widget.destroy()
+            # Remove from proposals and checkboxes
+            if index < len(self._match_proposals):
+                self._match_proposals[index] = None  # mark as removed
+            if index < len(self._match_checkboxes):
+                self._match_checkboxes[index].set(False)
+            # Update confirm count
+            active = sum(
+                1 for i, v in enumerate(self._match_checkboxes)
+                if v.get() and i < len(self._match_proposals) and self._match_proposals[i] is not None
+            )
+            self.btn_confirm_matches.configure(
+                text=f"✅  Confirm & Write {active} Match(es) to Airtable",
+                state="normal" if active > 0 else "disabled",
+            )
+            rejected_count = len(self._rejected_matches)
+            self.lbl_match_status.configure(
+                text=f"Rejected {rejected_count} match(es) — they won't appear again this session.",
+                text_color=WARNING,
+            )
+
+        ctk.CTkButton(
+            row, text="✕", width=32, height=28,
+            fg_color="#7F1D1D", hover_color=ERROR,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            command=_reject,
+        ).pack(side="right", padx=(4, 8), pady=8)
+
     def _toggle_select_all_matches(self):
         val = self._match_select_all_var.get()
         for var in self._match_checkboxes:
@@ -1582,7 +1623,10 @@ class InvoiceUploaderApp(ctk.CTk):
         self._update_confirm_count()
 
     def _update_confirm_count(self):
-        count = sum(1 for v in self._match_checkboxes if v.get())
+        count = sum(
+            1 for i, v in enumerate(self._match_checkboxes)
+            if v.get() and i < len(self._match_proposals) and self._match_proposals[i] is not None
+        )
         self.btn_confirm_matches.configure(
             text=f"✅  Confirm & Write {count} Match(es) to Airtable",
             state="normal" if count > 0 else "disabled",
@@ -1595,7 +1639,8 @@ class InvoiceUploaderApp(ctk.CTk):
     def _confirm_matches(self):
         selected = [
             self._match_proposals[i]
-            for i, var in enumerate(self._match_checkboxes) if var.get()
+            for i, var in enumerate(self._match_checkboxes)
+            if var.get() and i < len(self._match_proposals) and self._match_proposals[i] is not None
         ]
         if not selected:
             return
