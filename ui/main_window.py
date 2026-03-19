@@ -1099,10 +1099,15 @@ class InvoiceUploaderApp(ctk.CTk):
                 amt_entry.pack(side="left", padx=4, pady=4)
 
                 # Type toggle button (click to swap Debit ↔ Credit)
-                type_var = ctk.StringVar(value="Debit")
+                parsed_type = txn.get("type", "Debit")
+                if parsed_type not in ("Debit", "Credit"):
+                    parsed_type = "Debit"
+                type_var = ctk.StringVar(value=parsed_type)
+                _type_fg = ERROR if parsed_type == "Debit" else SUCCESS
+                _type_hover = "#B91C1C" if parsed_type == "Debit" else "#15803D"
                 type_btn = ctk.CTkButton(
-                    row_frame, text="Debit", width=90, height=28,
-                    fg_color=ERROR, hover_color="#B91C1C",
+                    row_frame, text=parsed_type, width=90, height=28,
+                    fg_color=_type_fg, hover_color=_type_hover,
                     font=ctk.CTkFont(size=11, weight="bold"),
                 )
 

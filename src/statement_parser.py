@@ -512,6 +512,9 @@ def parse_statement(
 
     elif ft == "pdf":
         txns = parse_pdf_statement(filepath, progress_callback)
+        # PDF uploads default ALL transactions to Debit
+        for t in txns:
+            t["type"] = "Debit"
         return txns, "pdf"
 
     else:
