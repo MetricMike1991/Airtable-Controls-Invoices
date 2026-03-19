@@ -722,6 +722,26 @@ class InvoiceUploaderApp(ctk.CTk):
                 try:
                     upload_invoice(data, fp, notes=notes, reviewed=reviewed)
                     uploaded += 1
+
+                    # Move file to "Already Uploaded" folder
+                    try:
+                        dest_dir = Path(r"C:\Users\35383\OneDrive\Desktop\Invoices\Already Uploaded")
+                        dest_dir.mkdir(parents=True, exist_ok=True)
+                        src_path = Path(fp)
+                        dest_path = dest_dir / src_path.name
+                        # Handle duplicate names
+                        if dest_path.exists():
+                            stem = src_path.stem
+                            suffix = src_path.suffix
+                            counter = 1
+                            while dest_path.exists():
+                                dest_path = dest_dir / f"{stem} ({counter}){suffix}"
+                                counter += 1
+                        import shutil
+                        shutil.move(str(src_path), str(dest_path))
+                    except Exception as move_err:
+                        print(f"[WARN] Could not move {name}: {move_err}")
+
                     self._upload_history.append({
                         "file": name,
                         "business": data.business_name,
