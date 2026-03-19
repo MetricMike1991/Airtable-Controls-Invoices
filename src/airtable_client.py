@@ -636,3 +636,82 @@ def commit_matches(
             progress_callback(total, total, f"Writing invoice links...")
 
     return {"committed": committed, "errors": errors}
+
+
+# ---------------------------------------------------------------------------
+# Reports: fetch views & records by view
+# ---------------------------------------------------------------------------
+
+def fetch_views_for_table(table_id: str) -> list[dict]:
+    """
+    Fetch all views for a given table from Airtable meta API.
+    Returns list of dicts: {id, name, type}.
+    """
+    import requests
+
+    api_key = os.getenv("AIRTABLE_API_KEY", "")
+    base_id = os.getenv("AIRTABLE_BASE_ID", "")
+
+    url = f"https://api.airtable.com/v0/meta/bases/{base_id}/tables"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    resp = requests.get(url, headers=headers)
+    resp.raise_for_status()
+
+    for tbl in resp.json().get("tables", []):
+        if tbl["id"] == table_id or tbl.get("name") == table_id:
+            return [
+                {"id": v["id"], "name": v["name"], "type": v.get("type", "")}
+                for v in tbl.get("views", [])
+            ]
+    return []
+
+
+def fetch_records_by_view(table_id: str, view_name: str) -> list[dict]:
+    """
+    Fetch all records from a specific view of a table.
+    Returns raw Airtable records: [{id, fields: {...}}, ...].
+    """
+    api_key = os.getenv("AIRTABLE_API_KEY", "")
+    base_id = os.getenv("AIRTABLE_BASE_ID", "")
+    api = Api(api_key)
+    table = api.table(base_id, table_id)
+    records = table.all(view=view_name)
+    return records
+
+
+def fetch_linked_records(table_id: str, record_ids: list[str]) -> dict[str, dict]:
+    """
+    Fetch records by ID from a table.
+    Returns {record_id: {id, fields}} dict.
+    """
+    if not record_ids:
+        return {}
+    api_key = os.getenv("AIRTABLE_API_KEY", "")
+    base_id = os.getenv("AIRTABLE_BASE_ID", "")
+    api = Api(api_key)
+    table = api.table(base_id, table_id)
+
+    result = {}
+    # Airtable formula: OR(RECORD_ID()='rec1',RECORD_ID()='rec2',...)
+    # Batch in groups of 50 to avoid formula length limits
+    for i in range(0, len(record_ids), 50):
+        batch = record_ids[i:i + 50]
+        formula = "OR(" + ",".join(f"RECORD_ID()='{rid}'" for rid in batch) + ")"
+        records = table.all(formula=formula)
+        for r in records:
+            result[r["id"]] = r
+    return result
+
+
+def get_table_ids() -> dict[str, str]:
+    """Return a mapping of friendly table names to their IDs."""
+    return {
+        "Invoices": os.getenv("AIRTABLE_TABLE_NAME", ""),
+        "Bank Transactions": os.getenv("AIRTABLE_BANK_TABLE_ID", ""),
+    }
+
+
+def build_record_url(record_id: str) -> str:
+    """Build a direct Airtable record URL."""
+    base_id = os.getenv("AIRTABLE_BASE_ID", "")
+    return f"https://airtable.com/{base_id}/{record_id}"

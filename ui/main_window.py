@@ -135,6 +135,13 @@ class InvoiceUploaderApp(ctk.CTk):
         )
         self.btn_match.pack(pady=4)
 
+        self.btn_reports = ctk.CTkButton(
+            self.sidebar, text="📊  Reports", width=190, height=40,
+            fg_color="transparent", hover_color="#333355",
+            command=self._show_reports_tab,
+        )
+        self.btn_reports.pack(pady=4)
+
         # Connection test at bottom
         self.sidebar_spacer = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         self.sidebar_spacer.pack(fill="both", expand=True)
@@ -172,7 +179,7 @@ class InvoiceUploaderApp(ctk.CTk):
             w.destroy()
 
     def _set_active_nav(self, active_btn):
-        for btn in (self.btn_upload, self.btn_history, self.btn_browse, self.btn_bank, self.btn_match):
+        for btn in (self.btn_upload, self.btn_history, self.btn_browse, self.btn_bank, self.btn_match, self.btn_reports):
             btn.configure(fg_color="transparent" if btn != active_btn else ACCENT)
 
     # ------------------------------------------------------------------
@@ -1567,6 +1574,381 @@ class InvoiceUploaderApp(ctk.CTk):
         threading.Thread(target=_worker, daemon=True).start()
 
     # ------------------------------------------------------------------
+    # Tab: Reports
+    # ------------------------------------------------------------------
+
+    def _show_reports_tab(self):
+        self._clear_main()
+        self._set_active_nav(self.btn_reports)
+        self._active_tab = "reports"
+
+        # State
+        self._report_views: list[dict] = []
+        self._report_records: list[dict] = []
+        self._report_table_choice = ctk.StringVar(value="Bank Transactions")
+        self._report_view_choice = ctk.StringVar(value="")
+        self._report_shared_url = ctk.StringVar(value="")
+
+        container = ctk.CTkScrollableFrame(self.main_frame, fg_color=BG_DARK)
+        container.pack(fill="both", expand=True, padx=20, pady=20)
+
+        ctk.CTkLabel(
+            container, text="📊  Generate Reports",
+            font=ctk.CTkFont(size=24, weight="bold"), text_color=TEXT,
+        ).pack(anchor="w", pady=(0, 5))
+
+        ctk.CTkLabel(
+            container,
+            text="Select a table and view from Airtable, then generate an Excel report\n"
+                 "with clickable links your accountant can use to access records.",
+            font=ctk.CTkFont(size=13), text_color=TEXT_DIM, justify="left",
+        ).pack(anchor="w", pady=(0, 20))
+
+        # --- Step 1: Table + View selection ---
+        step1 = ctk.CTkFrame(container, fg_color=BG_CARD, corner_radius=10)
+        step1.pack(fill="x", pady=(0, 12))
+
+        ctk.CTkLabel(
+            step1, text="1️⃣  Select Table & View",
+            font=ctk.CTkFont(size=15, weight="bold"), text_color=TEXT,
+        ).pack(anchor="w", padx=16, pady=(12, 8))
+
+        row1 = ctk.CTkFrame(step1, fg_color="transparent")
+        row1.pack(fill="x", padx=16, pady=(0, 8))
+
+        ctk.CTkLabel(row1, text="Table:", font=ctk.CTkFont(size=13), text_color=TEXT).pack(side="left", padx=(0, 8))
+        self.report_table_menu = ctk.CTkOptionMenu(
+            row1, values=["Bank Transactions", "Invoices"],
+            variable=self._report_table_choice,
+            width=200, height=32,
+            fg_color="#333355", button_color=ACCENT,
+            command=lambda _: self._load_views_for_report(),
+        )
+        self.report_table_menu.pack(side="left", padx=(0, 20))
+
+        ctk.CTkLabel(row1, text="View:", font=ctk.CTkFont(size=13), text_color=TEXT).pack(side="left", padx=(0, 8))
+        self.report_view_menu = ctk.CTkOptionMenu(
+            row1, values=["Loading..."],
+            variable=self._report_view_choice,
+            width=250, height=32,
+            fg_color="#333355", button_color=ACCENT,
+        )
+        self.report_view_menu.pack(side="left")
+
+        # --- Step 2: Shared view URL ---
+        step2 = ctk.CTkFrame(container, fg_color=BG_CARD, corner_radius=10)
+        step2.pack(fill="x", pady=(0, 12))
+
+        ctk.CTkLabel(
+            step2, text="2️⃣  Shared View URL (for clickable links)",
+            font=ctk.CTkFont(size=15, weight="bold"), text_color=TEXT,
+        ).pack(anchor="w", padx=16, pady=(12, 4))
+
+        ctk.CTkLabel(
+            step2,
+            text="Paste the shared view link from Airtable (Share view → Copy link).\n"
+                 "This makes links in the report clickable for your accountant.",
+            font=ctk.CTkFont(size=11), text_color=TEXT_DIM, justify="left",
+        ).pack(anchor="w", padx=16, pady=(0, 6))
+
+        self.report_url_entry = ctk.CTkEntry(
+            step2, textvariable=self._report_shared_url,
+            width=500, height=34,
+            fg_color="#1E1E2E", border_color="#555566",
+            placeholder_text="https://airtable.com/shrXXXXXXXXXXXX",
+            font=ctk.CTkFont(size=12),
+        )
+        self.report_url_entry.pack(anchor="w", padx=16, pady=(0, 12))
+
+        # --- Step 3: Preview + Generate ---
+        step3 = ctk.CTkFrame(container, fg_color=BG_CARD, corner_radius=10)
+        step3.pack(fill="x", pady=(0, 12))
+
+        ctk.CTkLabel(
+            step3, text="3️⃣  Preview & Generate",
+            font=ctk.CTkFont(size=15, weight="bold"), text_color=TEXT,
+        ).pack(anchor="w", padx=16, pady=(12, 8))
+
+        btn_row = ctk.CTkFrame(step3, fg_color="transparent")
+        btn_row.pack(fill="x", padx=16, pady=(0, 8))
+
+        self.btn_preview_report = ctk.CTkButton(
+            btn_row, text="🔍  Preview Records", width=200, height=38,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            fg_color=ACCENT, hover_color="#1D4ED8",
+            command=self._preview_report_records,
+        )
+        self.btn_preview_report.pack(side="left", padx=(0, 12))
+
+        self.btn_generate_report = ctk.CTkButton(
+            btn_row, text="📥  Generate Excel Report", width=240, height=38,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            fg_color=SUCCESS, hover_color="#15803D",
+            command=self._generate_report,
+            state="disabled",
+        )
+        self.btn_generate_report.pack(side="left")
+
+        # Progress / status
+        self.report_progress = ctk.CTkProgressBar(step3, width=500, height=12)
+        self.report_progress.pack(padx=16, pady=(0, 4))
+        self.report_progress.set(0)
+
+        self.lbl_report_status = ctk.CTkLabel(
+            step3, text="Select a table and view, then click Preview.",
+            font=ctk.CTkFont(size=12), text_color=TEXT_DIM,
+        )
+        self.lbl_report_status.pack(anchor="w", padx=16, pady=(0, 12))
+
+        # Preview area
+        self.report_preview_frame = ctk.CTkFrame(container, fg_color=BG_DARK)
+        self.report_preview_frame.pack(fill="both", expand=True)
+
+        # Auto-load views
+        self._load_views_for_report()
+
+    def _load_views_for_report(self):
+        table_name = self._report_table_choice.get()
+        self.report_view_menu.configure(values=["Loading..."])
+        self._report_view_choice.set("Loading...")
+
+        def _worker():
+            from src.airtable_client import fetch_views_for_table, get_table_ids
+            try:
+                table_ids = get_table_ids()
+                table_id = table_ids.get(table_name, "")
+                views = fetch_views_for_table(table_id)
+                self._report_views = views
+                names = [v["name"] for v in views] if views else ["(no views found)"]
+                self.after(0, lambda: self.report_view_menu.configure(values=names))
+                self.after(0, lambda: self._report_view_choice.set(names[0]))
+            except Exception as e:
+                self.after(0, lambda: self._report_view_choice.set(f"Error: {e}"))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _preview_report_records(self):
+        table_name = self._report_table_choice.get()
+        view_name = self._report_view_choice.get()
+        if not view_name or view_name.startswith("(") or view_name.startswith("Error") or view_name == "Loading...":
+            messagebox.showwarning("No View", "Please select a valid view first.")
+            return
+
+        self.btn_preview_report.configure(state="disabled", text="⏳  Loading...")
+        self.btn_generate_report.configure(state="disabled")
+        self.report_progress.set(0)
+        self.lbl_report_status.configure(text="Fetching records from Airtable...", text_color=TEXT_DIM)
+
+        # Clear preview
+        for w in self.report_preview_frame.winfo_children():
+            w.destroy()
+
+        def _worker():
+            from src.airtable_client import fetch_records_by_view, get_table_ids
+            try:
+                table_ids = get_table_ids()
+                table_id = table_ids.get(table_name, "")
+                records = fetch_records_by_view(table_id, view_name)
+                self._report_records = records
+                self.after(0, lambda: self._render_report_preview(records, table_name))
+            except Exception as e:
+                self.after(0, lambda: self.lbl_report_status.configure(
+                    text=f"❌ Error: {e}", text_color=ERROR
+                ))
+            finally:
+                self.after(0, lambda: self.btn_preview_report.configure(
+                    state="normal", text="🔍  Preview Records"
+                ))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _render_report_preview(self, records: list[dict], table_name: str):
+        self.report_progress.set(1.0)
+
+        if not records:
+            self.lbl_report_status.configure(text="ℹ️ No records found in this view.", text_color=TEXT_DIM)
+            return
+
+        self.lbl_report_status.configure(
+            text=f"✅ {len(records)} record(s) loaded. Review below, then Generate.",
+            text_color=SUCCESS,
+        )
+        self.btn_generate_report.configure(state="normal")
+
+        frame = self.report_preview_frame
+
+        if table_name == "Bank Transactions":
+            cols = [("Date", 100), ("Description", 220), ("Amount", 100), ("Type", 80), ("Matched", 80)]
+        else:
+            cols = [("Business", 180), ("Invoice #", 120), ("Date", 100), ("Total", 110), ("Matched", 80)]
+
+        # Header
+        hdr = ctk.CTkFrame(frame, fg_color="#333355", corner_radius=6)
+        hdr.pack(fill="x", padx=10, pady=(6, 2))
+        for col_text, w in cols:
+            ctk.CTkLabel(
+                hdr, text=col_text, width=w,
+                font=ctk.CTkFont(size=11, weight="bold"), text_color=TEXT,
+            ).pack(side="left", padx=6, pady=6)
+
+        # Show first 50 records max in preview
+        for i, rec in enumerate(records[:50]):
+            f = rec.get("fields", {})
+            row = ctk.CTkFrame(frame, fg_color=BG_CARD if i % 2 == 0 else "#2E2E40", corner_radius=4)
+            row.pack(fill="x", padx=10, pady=1)
+
+            if table_name == "Bank Transactions":
+                matched = f.get("Matched Invoice", [])
+                match_text = f"✅ {len(matched)}" if matched else "❌"
+                vals = [
+                    (str(f.get("Date", "")), 100),
+                    (str(f.get("Description", ""))[:30], 220),
+                    (f"€{float(f.get('Amount', 0) or 0):.2f}", 100),
+                    (str(f.get("Type", "")), 80),
+                    (match_text, 80),
+                ]
+            else:
+                linked = f.get("Bank Transactions", [])
+                match_text = f"✅ {len(linked)}" if linked else "❌"
+                total_raw = f.get("Total Invoice Including VAT", "")
+                vals = [
+                    (str(f.get("Business Name", ""))[:25], 180),
+                    (str(f.get("Invoice Number", "")), 120),
+                    (str(f.get("Date Of Invoice", "")), 100),
+                    (str(total_raw), 110),
+                    (match_text, 80),
+                ]
+
+            for val, w in vals:
+                ctk.CTkLabel(
+                    row, text=val, width=w,
+                    font=ctk.CTkFont(size=11), text_color=TEXT,
+                ).pack(side="left", padx=6, pady=5)
+
+        if len(records) > 50:
+            ctk.CTkLabel(
+                frame, text=f"... and {len(records) - 50} more records (all will be in the report)",
+                font=ctk.CTkFont(size=11), text_color=TEXT_DIM,
+            ).pack(anchor="w", padx=16, pady=6)
+
+    def _generate_report(self):
+        if not self._report_records:
+            messagebox.showwarning("No Data", "Preview records first.")
+            return
+
+        table_name = self._report_table_choice.get()
+        view_name = self._report_view_choice.get()
+        shared_url = self._report_shared_url.get().strip().rstrip("/")
+
+        # Ask for save location
+        safe_view = "".join(c if c.isalnum() or c in " -_" else "_" for c in view_name)
+        default_name = f"{table_name} - {safe_view}.xlsx"
+        filepath = filedialog.asksaveasfilename(
+            title="Save Report As",
+            defaultextension=".xlsx",
+            filetypes=[("Excel Files", "*.xlsx")],
+            initialfile=default_name,
+        )
+        if not filepath:
+            return
+
+        self.btn_generate_report.configure(state="disabled", text="⏳  Generating...")
+        self.report_progress.set(0)
+        self.lbl_report_status.configure(text="Fetching linked records...", text_color=TEXT_DIM)
+
+        def _worker():
+            from src.airtable_client import fetch_linked_records, get_table_ids
+            from src.report_generator import generate_bank_txn_report, generate_invoice_report
+            import os as _os
+
+            try:
+                table_ids = get_table_ids()
+                records = self._report_records
+
+                self.after(0, lambda: self.report_progress.set(0.3))
+
+                if table_name == "Bank Transactions":
+                    # Collect all linked invoice IDs
+                    inv_ids = set()
+                    for rec in records:
+                        linked = rec.get("fields", {}).get("Matched Invoice", [])
+                        for x in (linked if isinstance(linked, list) else []):
+                            inv_ids.add(x if isinstance(x, str) else x.get("id", ""))
+                    inv_ids.discard("")
+
+                    self.after(0, lambda: self.lbl_report_status.configure(
+                        text=f"Fetching {len(inv_ids)} linked invoice(s)...", text_color=TEXT_DIM
+                    ))
+
+                    linked_invoices = fetch_linked_records(
+                        table_ids.get("Invoices", ""), list(inv_ids)
+                    ) if inv_ids else {}
+
+                    self.after(0, lambda: self.report_progress.set(0.7))
+                    self.after(0, lambda: self.lbl_report_status.configure(
+                        text="Generating Excel file...", text_color=TEXT_DIM
+                    ))
+
+                    out = generate_bank_txn_report(
+                        records=records,
+                        linked_invoices=linked_invoices,
+                        shared_view_url=shared_url,
+                        output_path=filepath,
+                        report_title=f"{table_name} – {view_name}",
+                    )
+                else:
+                    # Collect all linked bank txn IDs
+                    txn_ids = set()
+                    for rec in records:
+                        linked = rec.get("fields", {}).get("Bank Transactions", [])
+                        for x in (linked if isinstance(linked, list) else []):
+                            txn_ids.add(x if isinstance(x, str) else x.get("id", ""))
+                    txn_ids.discard("")
+
+                    self.after(0, lambda: self.lbl_report_status.configure(
+                        text=f"Fetching {len(txn_ids)} linked transaction(s)...", text_color=TEXT_DIM
+                    ))
+
+                    linked_txns = fetch_linked_records(
+                        table_ids.get("Bank Transactions", ""), list(txn_ids)
+                    ) if txn_ids else {}
+
+                    self.after(0, lambda: self.report_progress.set(0.7))
+                    self.after(0, lambda: self.lbl_report_status.configure(
+                        text="Generating Excel file...", text_color=TEXT_DIM
+                    ))
+
+                    out = generate_invoice_report(
+                        records=records,
+                        linked_bank_txns=linked_txns,
+                        shared_view_url=shared_url,
+                        output_path=filepath,
+                        report_title=f"{table_name} – {view_name}",
+                    )
+
+                self.after(0, lambda: self.report_progress.set(1.0))
+                self.after(0, lambda: self.lbl_report_status.configure(
+                    text=f"✅ Report saved to: {out}", text_color=SUCCESS
+                ))
+
+                # Open the file
+                try:
+                    _os.startfile(str(out))
+                except Exception:
+                    pass
+
+            except Exception as e:
+                self.after(0, lambda: self.lbl_report_status.configure(
+                    text=f"❌ Error: {e}", text_color=ERROR
+                ))
+            finally:
+                self.after(0, lambda: self.btn_generate_report.configure(
+                    state="normal", text="📥  Generate Excel Report"
+                ))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    # ------------------------------------------------------------------
     # Open file for manual review
     # ------------------------------------------------------------------
 
@@ -1597,6 +1979,7 @@ class InvoiceUploaderApp(ctk.CTk):
             "browse": self._show_browse_tab,
             "bank": self._show_bank_tab,
             "match": self._show_match_tab,
+            "reports": self._show_reports_tab,
         }
 
         show_fn = tab_map.get(self._active_tab, self._show_browse_tab)
