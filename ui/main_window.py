@@ -730,13 +730,16 @@ class InvoiceUploaderApp(ctk.CTk):
                         src_path = Path(fp)
                         suffix = src_path.suffix
 
-                        # Build new filename: Processed - Business Name - €Amount - Date
+                        # Build new filename: Processed - Business Name - Amount - Date
                         biz = (data.business_name or "Unknown").strip()
-                        amt = f"€{data.total_inc_vat:,.2f}" if data.total_inc_vat else "€0.00"
+                        try:
+                            amt = f"{float(data.total_inc_vat):.2f}"
+                        except (ValueError, TypeError):
+                            amt = str(data.total_inc_vat or "0.00").strip()
                         inv_date = (data.invoice_date or "NoDate").strip()
-                        # Sanitise characters not allowed in filenames
+                        # Sanitise characters not allowed in Windows filenames
                         import re as _re
-                        safe = lambda s: _re.sub(r'[<>:"/\\|?*]', '_', s)
+                        safe = lambda s: _re.sub(r'[<>:"/\\|?*,€£$]', '', s).strip()
                         new_name = f"Processed - {safe(biz)} - {safe(amt)} - {safe(inv_date)}{suffix}"
 
                         dest_path = dest_dir / new_name
@@ -749,8 +752,11 @@ class InvoiceUploaderApp(ctk.CTk):
                                 counter += 1
                         import shutil
                         shutil.move(str(src_path), str(dest_path))
+                        print(f"[INFO] Moved {src_path} -> {dest_path}")
                     except Exception as move_err:
+                        import traceback
                         print(f"[WARN] Could not move {name}: {move_err}")
+                        traceback.print_exc()
 
                     self._upload_history.append({
                         "file": name,
