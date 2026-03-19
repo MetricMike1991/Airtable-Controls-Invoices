@@ -224,10 +224,21 @@ def _parse_sumup_bank(df: pd.DataFrame) -> list[dict]:
             txn_type = "Credit"
         amount = abs(signed_amount)
 
-        # Description: use Reference, fall back to Transaction code
-        desc = str(row.get(ref_col, "")).strip() if ref_col else ""
-        code = str(row.get(code_col, "")).strip() if code_col else ""
-        if not desc:
+        # Description: ALWAYS from Reference column
+        raw_ref = row.get(ref_col) if ref_col else None
+        if pd.isna(raw_ref) or str(raw_ref).strip() in ("", "nan", "None"):
+            desc = ""
+        else:
+            desc = str(raw_ref).strip()
+
+        raw_code = row.get(code_col) if code_col else None
+        if pd.isna(raw_code) or str(raw_code).strip() in ("", "nan", "None"):
+            code = ""
+        else:
+            code = str(raw_code).strip()
+
+        # Only fall back to code if Reference is truly empty
+        if not desc and code:
             desc = code
 
         results.append({
