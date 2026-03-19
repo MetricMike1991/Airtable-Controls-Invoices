@@ -10,6 +10,10 @@ Bank of Ireland CSV typically has columns like:
 
 SumUp CSV/Excel typically has columns like:
   Date, Transaction Type, Description, Amount, Fee, Net, etc.
+
+SumUp Bank Export (Excel) typically has columns like:
+  Transaction date, Transaction code, Reference, Amount, Available balance
+  (negative Amount = Debit, positive = Credit)
 """
 
 from __future__ import annotations
@@ -44,6 +48,9 @@ def _normalise_col(name: str) -> str:
 
 def _detect_format(df: pd.DataFrame) -> str:
     cols = {_normalise_col(c) for c in df.columns}
+    # SumUp bank export: Transaction date, Transaction code, Reference, Amount, Available balance
+    if any("transactioncode" in c for c in cols) and any("availablebalance" in c for c in cols):
+        return "sumup_bank"
     if any("transactiontype" in c or "salesamount" in c or "sumup" in c for c in cols):
         return "sumup"
     if any("debit" in c or "credit" in c for c in cols):
@@ -110,6 +117,8 @@ def parse_csv_excel(filepath: str | Path) -> list[dict]:
     fmt = _detect_format(df)
     if fmt == "boi":
         return _parse_boi(df)
+    elif fmt == "sumup_bank":
+        return _parse_sumup_bank(df)
     elif fmt == "sumup":
         return _parse_sumup(df)
     else:
@@ -175,6 +184,58 @@ def _parse_sumup(df: pd.DataFrame) -> list[dict]:
             "amount": amount,
             "type": txn_type,
             "reference": str(row.get(ref_col, "")).strip() if ref_col else "",
+        })
+    return results
+
+
+def _parse_sumup_bank(df: pd.DataFrame) -> list[dict]:
+    """
+    Parse SumUp bank export format:
+      Transaction date | Transaction code | Reference | Amount | Available balance
+
+    Negative Amount = Debit, Positive Amount = Credit.
+    """
+    date_col = _find_col(df, "transaction date", "date")
+    code_col = _find_col(df, "transaction code", "code")
+    ref_col = _find_col(df, "reference", "ref")
+    amount_col = _find_col(df, "amount")
+    balance_col = _find_col(df, "available balance", "balance")
+
+    results = []
+    for _, row in df.iterrows():
+        # Get raw signed amount
+        raw_val = row.get(amount_col) if amount_col else None
+        if pd.isna(raw_val):
+            continue
+        try:
+            signed_amount = float(
+                str(raw_val).replace(",", "").replace("\u20ac", "").replace("\xa3", "").replace("$", "").strip()
+            )
+        except (ValueError, TypeError):
+            continue
+
+        if signed_amount == 0:
+            continue
+
+        # Negative = Debit, Positive = Credit
+        if signed_amount < 0:
+            txn_type = "Debit"
+        else:
+            txn_type = "Credit"
+        amount = abs(signed_amount)
+
+        # Description: use Reference, fall back to Transaction code
+        desc = str(row.get(ref_col, "")).strip() if ref_col else ""
+        code = str(row.get(code_col, "")).strip() if code_col else ""
+        if not desc:
+            desc = code
+
+        results.append({
+            "date": _parse_date(row.get(date_col)) if date_col else "",
+            "description": desc,
+            "amount": amount,
+            "type": txn_type,
+            "reference": code,
         })
     return results
 
@@ -408,22 +469,45 @@ def parse_statement(
     """
     Parse a bank statement file (CSV, Excel, or PDF).
     Returns (transactions, source_type).
-    source_type is 'boi', 'sumup', or 'pdf'.
+    source_type is 'boi', 'sumup', 'sumup_bank', or 'pdf'.
     """
     ft = file_type(filepath)
 
     if ft == "spreadsheet":
         txns = parse_csv_excel(filepath)
+
+        # Detect source by reading the file and checking format
         ext = Path(filepath).suffix.lower()
         if ext == ".csv":
             try:
-                with open(str(filepath), "r", encoding="utf-8", errors="replace") as f:
-                    header = f.readline().lower()
-                source = "sumup" if "sumup" in header or "sales" in header else "boi"
+                df = pd.read_csv(str(filepath), nrows=0)
             except Exception:
-                source = "boi"
+                df = pd.DataFrame()
         else:
+            try:
+                df = pd.read_excel(str(filepath), nrows=0)
+            except Exception:
+                df = pd.DataFrame()
+
+        detected = _detect_format(df) if not df.empty or len(df.columns) > 0 else "generic"
+        if detected == "sumup_bank":
+            source = "sumup"
+        elif detected == "sumup":
+            source = "sumup"
+        elif detected == "boi":
             source = "boi"
+        else:
+            # Fallback: check CSV header text
+            if ext == ".csv":
+                try:
+                    with open(str(filepath), "r", encoding="utf-8", errors="replace") as f:
+                        header = f.readline().lower()
+                    source = "sumup" if "sumup" in header or "sales" in header else "boi"
+                except Exception:
+                    source = "boi"
+            else:
+                source = "boi"
+
         return txns, source
 
     elif ft == "pdf":
