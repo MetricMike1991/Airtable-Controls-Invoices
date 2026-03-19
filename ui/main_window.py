@@ -723,17 +723,27 @@ class InvoiceUploaderApp(ctk.CTk):
                     upload_invoice(data, fp, notes=notes, reviewed=reviewed)
                     uploaded += 1
 
-                    # Move file to "Already Uploaded" folder
+                    # Move file to "Already Uploaded" folder with processed name
                     try:
                         dest_dir = Path(r"C:\Users\35383\OneDrive\Desktop\Invoices\Already Uploaded")
                         dest_dir.mkdir(parents=True, exist_ok=True)
                         src_path = Path(fp)
-                        dest_path = dest_dir / src_path.name
+                        suffix = src_path.suffix
+
+                        # Build new filename: Processed - Business Name - €Amount - Date
+                        biz = (data.business_name or "Unknown").strip()
+                        amt = f"€{data.total_inc_vat:,.2f}" if data.total_inc_vat else "€0.00"
+                        inv_date = (data.invoice_date or "NoDate").strip()
+                        # Sanitise characters not allowed in filenames
+                        import re as _re
+                        safe = lambda s: _re.sub(r'[<>:"/\\|?*]', '_', s)
+                        new_name = f"Processed - {safe(biz)} - {safe(amt)} - {safe(inv_date)}{suffix}"
+
+                        dest_path = dest_dir / new_name
                         # Handle duplicate names
                         if dest_path.exists():
-                            stem = src_path.stem
-                            suffix = src_path.suffix
                             counter = 1
+                            stem = f"Processed - {safe(biz)} - {safe(amt)} - {safe(inv_date)}"
                             while dest_path.exists():
                                 dest_path = dest_dir / f"{stem} ({counter}){suffix}"
                                 counter += 1
