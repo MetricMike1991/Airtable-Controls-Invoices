@@ -1540,50 +1540,7 @@ class InvoiceUploaderApp(ctk.CTk):
         row.pack(fill="x", padx=10, pady=2)
         row.pack_propagate(False)
 
-        # Checkbox
-        var = ctk.BooleanVar(value=True)
-        self._match_checkboxes.append(var)
-        ctk.CTkCheckBox(
-            row, text="", variable=var, width=30,
-            command=self._update_confirm_count,
-        ).pack(side="left", padx=(8, 4), pady=8)
-
-        # Bank transaction info
-        txn_text = f"{txn['description'][:30]}  •  €{txn['amount']:.2f}  •  {txn['date']}"
-        ctk.CTkLabel(
-            row, text=txn_text, font=ctk.CTkFont(size=12),
-            text_color=TEXT, width=250, anchor="w",
-        ).pack(side="left", padx=6)
-
-        # Arrow
-        ctk.CTkLabel(row, text="→", font=ctk.CTkFont(size=14), text_color=ACCENT, width=20).pack(side="left")
-
-        # Invoice info
-        inv_text = f"{inv['business_name'][:25]}  •  €{inv['total_inc_vat']:.2f}  •  {inv['invoice_date']}"
-        ctk.CTkLabel(
-            row, text=inv_text, font=ctk.CTkFont(size=12),
-            text_color=TEXT, width=250, anchor="w",
-        ).pack(side="left", padx=6)
-
-        # Score badge
-        score_pct = int(score * 100)
-        score_color = SUCCESS if score_pct >= 70 else (WARNING if score_pct >= 50 else ERROR)
-        ctk.CTkLabel(
-            row, text=f"{score_pct}%",
-            font=ctk.CTkFont(size=13, weight="bold"),
-            text_color=score_color, width=60,
-        ).pack(side="left", padx=6)
-
-        # Date diff
-        dd_text = f"{date_diff}d" if date_diff is not None else "n/a"
-        dd_color = SUCCESS if date_diff is not None and date_diff <= 3 else (TEXT_DIM if date_diff is None else WARNING)
-        ctk.CTkLabel(
-            row, text=dd_text,
-            font=ctk.CTkFont(size=12),
-            text_color=dd_color, width=50,
-        ).pack(side="left", padx=6)
-
-        # Reject button — "Not a match"
+        # Reject button — pack FIRST (side=right) so it reserves space
         def _reject(index=idx, row_widget=row, proposal=prop):
             inv_id = proposal["invoice"]["id"]
             txn_id = proposal["txn"]["airtable_id"]
@@ -1610,11 +1567,54 @@ class InvoiceUploaderApp(ctk.CTk):
             )
 
         ctk.CTkButton(
-            row, text="✕", width=32, height=28,
+            row, text="✕", width=36, height=32,
             fg_color="#7F1D1D", hover_color=ERROR,
-            font=ctk.CTkFont(size=13, weight="bold"),
+            font=ctk.CTkFont(size=14, weight="bold"),
             command=_reject,
         ).pack(side="right", padx=(4, 8), pady=8)
+
+        # Checkbox
+        var = ctk.BooleanVar(value=True)
+        self._match_checkboxes.append(var)
+        ctk.CTkCheckBox(
+            row, text="", variable=var, width=30,
+            command=self._update_confirm_count,
+        ).pack(side="left", padx=(8, 4), pady=8)
+
+        # Bank transaction info
+        txn_text = f"{txn['description'][:28]}  •  €{txn['amount']:.2f}  •  {txn['date']}"
+        ctk.CTkLabel(
+            row, text=txn_text, font=ctk.CTkFont(size=11),
+            text_color=TEXT, width=230, anchor="w",
+        ).pack(side="left", padx=4)
+
+        # Arrow
+        ctk.CTkLabel(row, text="→", font=ctk.CTkFont(size=14), text_color=ACCENT, width=20).pack(side="left")
+
+        # Invoice info
+        inv_text = f"{inv['business_name'][:22]}  •  €{inv['total_inc_vat']:.2f}  •  {inv['invoice_date']}"
+        ctk.CTkLabel(
+            row, text=inv_text, font=ctk.CTkFont(size=11),
+            text_color=TEXT, width=230, anchor="w",
+        ).pack(side="left", padx=4)
+
+        # Score badge
+        score_pct = int(score * 100)
+        score_color = SUCCESS if score_pct >= 70 else (WARNING if score_pct >= 50 else ERROR)
+        ctk.CTkLabel(
+            row, text=f"{score_pct}%",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=score_color, width=50,
+        ).pack(side="left", padx=4)
+
+        # Date diff
+        dd_text = f"{date_diff}d" if date_diff is not None else "n/a"
+        dd_color = SUCCESS if date_diff is not None and date_diff <= 3 else (TEXT_DIM if date_diff is None else WARNING)
+        ctk.CTkLabel(
+            row, text=dd_text,
+            font=ctk.CTkFont(size=11),
+            text_color=dd_color, width=40,
+        ).pack(side="left", padx=4)
 
     def _toggle_select_all_matches(self):
         val = self._match_select_all_var.get()
